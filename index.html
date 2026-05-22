@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Password Analyzer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+    <h1>Password Analyzer</h1>
+    <p>Analyze password strength and run a timed crack test.</p>
+
+    <div class="card">
+        <label>Password</label>
+
+        <div class="password-container">
+            <input type="password" id="password">
+            <button type="button" onclick="togglePassword(this)">Show</button>
+        </div>
+
+        <label>Minimum Length</label>
+        <input type="number" id="minLength" value="8">
+
+        <label><input type="checkbox" id="upper" checked> Require uppercase</label>
+        <label><input type="checkbox" id="lower" checked> Require lowercase</label>
+        <label><input type="checkbox" id="digit" checked> Require digit</label>
+        <label><input type="checkbox" id="symbol"> Require special character</label>
+
+        <label>Crack Test Time Limit (seconds)</label>
+        <input type="number" id="timeLimit" value="2">
+
+        <button onclick="runAnalysis()">Run Analysis</button>
+    </div>
+
+    <div class="card results" id="results" style="display:none;">
+        <h2>Results</h2>
+
+        <p class="score"><span id="score"></span>/100</p>
+        <p><strong>Strength:</strong> <span id="strength"></span></p>
+
+        <h3>Weaknesses</h3>
+        <ul id="feedback"></ul>
+
+        <h3>Crack Test</h3>
+        <p><strong>Cracked:</strong> <span id="cracked"></span></p>
+        <p><strong>Mode:</strong> <span id="mode"></span></p>
+        <p><strong>Time:</strong> <span id="time"></span> seconds</p>
+        <p><strong>Guesses:</strong> <span id="guesses"></span></p>
+
+        <h3>Comparison</h3>
+        <p id="comparison"></p>
+    </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
