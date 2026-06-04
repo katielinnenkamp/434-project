@@ -94,8 +94,8 @@ function analyzePassword(password) {
         feedback.push("Contains a common year.");
     }
 
-    if (/(.)\1\1/.test(password)) {
-        score -= 20;
+    if (/(.)\1\1+/.test(password)) {
+        score -= 15;
         feedback.push("Contains repeated characters.");
     }
 
@@ -133,6 +133,38 @@ function analyzePassword(password) {
 
     if (length >= 12 && varietyCount >= 3) {
         score += 10;
+    }
+
+    if (length >= 16 && varietyCount >= 3) {
+        score += 20;
+    }
+
+    if (/^[a-z0-9]+(-[a-z0-9]+)+$/i.test(password) && length >= 16) {
+        score += 15;
+    }
+
+    const looksRandomSegmented =
+        /^[a-z0-9]+(-[a-z0-9]+)+$/i.test(password);
+
+    const segmentParts = password.split("-");
+
+    const hasEnoughSegments = segmentParts.length >= 4;
+    const segmentsAreReasonable = segmentParts.every(part => part.length >= 3);
+    const hasMixedSegmentContent = segmentParts.some(part => /[0-9]/.test(part)) &&
+                                segmentParts.some(part => /[a-z]/i.test(part));
+
+    if (
+        looksRandomSegmented &&
+        password.length >= 16 &&
+        hasEnoughSegments &&
+        segmentsAreReasonable &&
+        hasMixedSegmentContent
+    ) {
+        score += 20;
+    }
+
+    if (score > 85 && feedback.length >= 1) {
+        score -= 10;
     }
 
     score = Math.max(0, Math.min(100, score));
@@ -239,7 +271,9 @@ function getSuggestions(feedback, score) {
         }
     }
 
-    if (score < 75) {
+    const passwordLength = document.getElementById("password").value.length;
+
+    if (score < 75 && passwordLength < 12) {
         suggestions.push("Increase password length to at least 12 characters.");
     }
 
