@@ -17,6 +17,34 @@ function togglePassword(button) {
     }
 }
 
+function validateRequirements(password) {
+    const errors = [];
+
+    const minLength = Number(document.getElementById("minLength").value);
+    const requireUpper = document.getElementById("upper").checked;
+
+    const requireDigit = document.getElementById("digit").checked;
+    const requireSymbol = document.getElementById("symbol").checked;
+
+    if (password.length < minLength) {
+        errors.push(`Password must be at least ${minLength} characters long.`);
+    }
+
+    if (requireUpper && !/[A-Z]/.test(password)) {
+        errors.push("Password must contain an uppercase letter.");
+    }
+
+    if (requireDigit && !/[0-9]/.test(password)) {
+        errors.push("Password must contain a number.");
+    }
+
+    if (requireSymbol && !/[^A-Za-z0-9]/.test(password)) {
+        errors.push("Password must contain a special character.");
+    }
+
+    return errors;
+}
+
 function analyzePassword(password) {
     let score = 0;
     let feedback = [];
@@ -24,13 +52,12 @@ function analyzePassword(password) {
     const length = password.length;
 
     const hasUpper = /[A-Z]/.test(password);
-    const hasLower = /[a-z]/.test(password);
     const hasDigit = /[0-9]/.test(password);
     const hasSymbol = /[^A-Za-z0-9]/.test(password);
 
     score += Math.min(length * 4, 40);
 
-    const varietyCount = [hasUpper, hasLower, hasDigit, hasSymbol].filter(Boolean).length;
+    const varietyCount = [hasUpper, hasDigit, hasSymbol].filter(Boolean).length;
     score += varietyCount * 10;
 
     const lower = password.toLowerCase();
@@ -96,7 +123,6 @@ function analyzePassword(password) {
 
     if (
         hasUpper &&
-        hasLower &&
         hasDigit &&
         hasSymbol &&
         !/^[A-Z]/.test(password) &&
@@ -127,25 +153,39 @@ function simulateCrackTest(score, timeLimit) {
     let guesses;
     let mode;
 
-    if (score < 30) {
+    if (score < 20) {
+
         cracked = true;
-        simulatedTime = Math.min(0.25, timeLimit);
-        guesses = Math.floor(25000 * simulatedTime);
+        simulatedTime = Math.min(0.15, timeLimit);
+        guesses = Math.floor(500 + Math.random() * 4500);
         mode = "Smart guessing";
-    } else if (score < 50) {
+
+    } else if (score < 40) {
+
         cracked = true;
-        simulatedTime = Math.min(timeLimit * 0.45, timeLimit);
-        guesses = Math.floor(90000 * simulatedTime);
+        simulatedTime = Math.min(timeLimit * 0.20, timeLimit);
+        guesses = Math.floor(5000 + Math.random() * 45000);
         mode = "Smart guessing";
-    } else if (score < 70) {
-        cracked = timeLimit >= 3;
-        simulatedTime = cracked ? Math.min(timeLimit * 0.85, timeLimit) : timeLimit;
-        guesses = Math.floor(250000 * simulatedTime);
-        mode = cracked ? "Smart guessing" : "Timed brute force";
-    } else {
+
+    } else if (score < 60) {
+
+        cracked = true;
+        simulatedTime = Math.min(timeLimit * 0.50, timeLimit);
+        guesses = Math.floor(50000 + Math.random() * 450000);
+        mode = "Pattern attack";
+
+    } else if (score < 80) {
+
         cracked = false;
         simulatedTime = timeLimit;
-        guesses = Math.floor(800000 * simulatedTime);
+        guesses = Math.floor(500000 + Math.random() * 4500000);
+        mode = "Timed brute force";
+
+    } else {
+
+        cracked = false;
+        simulatedTime = timeLimit;
+        guesses = Math.floor(5000000 + Math.random() * 95000000);
         mode = "Timed brute force";
     }
 
@@ -157,13 +197,84 @@ function simulateCrackTest(score, timeLimit) {
     };
 }
 
+function getSuggestions(feedback, score) {
+    const suggestions = [];
+
+    for (let item of feedback) {
+
+        if (item.includes("common word")) {
+            suggestions.push("Avoid common words and dictionary terms.");
+        }
+
+        if (item.includes("keyboard pattern")) {
+            suggestions.push("Avoid keyboard patterns like qwerty or asdf.");
+        }
+
+        if (item.includes("sequential")) {
+            suggestions.push("Avoid sequences such as 123 or abc.");
+        }
+
+        if (item.includes("year")) {
+            suggestions.push("Avoid years, birthdays, or dates.");
+        }
+
+        if (item.includes("repeated")) {
+            suggestions.push("Avoid repeated characters like aaa or 111.");
+        }
+
+        if (item.includes("Capital letter only")) {
+            suggestions.push("Place uppercase letters in less predictable locations.");
+        }
+
+        if (item.includes("Numbers only")) {
+            suggestions.push("Mix numbers throughout the password.");
+        }
+
+        if (item.includes("Special characters only")) {
+            suggestions.push("Place special characters in the middle as well.");
+        }
+
+        if (item.includes("one character type")) {
+            suggestions.push("Use uppercase, lowercase, numbers, and symbols.");
+        }
+    }
+
+    if (score < 75) {
+        suggestions.push("Increase password length to at least 12 characters.");
+    }
+
+    if (suggestions.length === 0) {
+        suggestions.push("No major improvements recommended.");
+    }
+
+    return [...new Set(suggestions)];
+}
+
 function runAnalysis() {
     const password = document.getElementById("password").value;
     const resultsDiv = document.getElementById("results");
+    const errorBox = document.getElementById("errorBox");
     const timeLimit = Number(document.getElementById("timeLimit").value) || 2;
 
+    errorBox.style.display = "none";
+    errorBox.innerHTML = "";
+
     if (!password) {
-        alert("Enter a password.");
+        errorBox.textContent = "Please enter a password.";
+        errorBox.style.display = "block";
+        resultsDiv.style.display = "none";
+        return;
+    }
+
+    const validationErrors = validateRequirements(password);
+
+    if (validationErrors.length > 0) {
+        errorBox.innerHTML =
+            "<strong>Password does not meet the selected requirements:</strong><br><br>" +
+            validationErrors.join("<br>");
+
+        errorBox.style.display = "block";
+        resultsDiv.style.display = "none";
         return;
     }
 
@@ -187,6 +298,20 @@ function runAnalysis() {
             feedbackList.appendChild(li);
         });
     }
+
+    const suggestionsList = document.getElementById("suggestions");
+    suggestionsList.innerHTML = "";
+
+    const suggestions = getSuggestions(
+        analysis.feedback,
+        analysis.score
+    );
+
+    suggestions.forEach(item => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        suggestionsList.appendChild(li);
+    });
 
     document.getElementById("cracked").textContent = crackResult.cracked ? "Yes" : "No";
     document.getElementById("mode").textContent = crackResult.mode;
