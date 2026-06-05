@@ -39,168 +39,243 @@ function validateRequirements(password) {
 }
 
 function analyzePassword(password) {
-    let score = 0;
-    let feedback = [];
+    const feedback = [];
+    const breakdown = { length: 0, variety: 0, structure: 0, deductions: 0, bonuses: 0 };
 
     const length = password.length;
+    const lower = password.toLowerCase();
 
+    const hasLower = /[a-z]/.test(password);
     const hasUpper = /[A-Z]/.test(password);
     const hasDigit = /[0-9]/.test(password);
     const hasSymbol = /[^A-Za-z0-9]/.test(password);
+    const types = [hasLower, hasUpper, hasDigit, hasSymbol];
+    const typeCount = types.filter(Boolean).length;
 
-    score += Math.min(length * 4, 40);
+    const uniqueChars = new Set(password);
+    const uniqueCount = uniqueChars.size;
 
-    const varietyCount = [hasUpper, hasDigit, hasSymbol].filter(Boolean).length;
-    score += varietyCount * 10;
+    // --- Length score (0-25): graduated with diminishing returns ---
+    if (length <= 4) {
+        breakdown.length = length * 1.5;
+    } else if (length <= 8) {
+        breakdown.length = 6 + (length - 4) * 2;
+    } else if (length <= 12) {
+        breakdown.length = 14 + (length - 8) * 1.5;
+    } else if (length <= 16) {
+        breakdown.length = 20 + (length - 12) * 1;
+    } else {
+        breakdown.length = 24 + Math.min((length - 16) * 0.25, 1);
+    }
 
-    const lower = password.toLowerCase();
+    // --- Variety score (0-20): scaled by number of types used ---
+    const varietyScores = [0, 4, 8, 14, 20];
+    breakdown.variety = varietyScores[Math.min(typeCount, 4)];
 
-    for (let word of commonWords) {
+    // --- Structure quality score (0-10) ---
+    // Measures interleaving and even distribution of character types
+    const typeRuns = [];
+    for (let i = 0; i < length; i++) {
+        const ch = password[i];
+        let t;
+        if (/[a-z]/.test(ch)) t = "l";
+        else if (/[A-Z]/.test(ch)) t = "u";
+        else if (/[0-9]/.test(ch)) t = "d";
+        else t = "s";
+        if (typeRuns.length === 0 || typeRuns[typeRuns.length - 1].type !== t) {
+            typeRuns.push({ type: t, count: 1 });
+        } else {
+            typeRuns[typeRuns.length - 1].count++;
+        }
+    }
+
+    const runCount = typeRuns.length;
+    if (runCount >= length * 0.6) breakdown.structure += 4;
+    else if (runCount >= length * 0.4) breakdown.structure += 2;
+
+    const typeDistribution = { l: 0, u: 0, d: 0, s: 0 };
+    for (const run of typeRuns) typeDistribution[run.type] += run.count;
+    const dominantRatio = Math.max(...Object.values(typeDistribution)) / length;
+    if (dominantRatio < 0.5) breakdown.structure += 3;
+    else if (dominantRatio < 0.7) breakdown.structure += 1;
+
+    const charRuns = [];
+    for (let i = 0; i < length; i++) {
+        if (charRuns.length === 0 || charRuns[charRuns.length - 1].char !== password[i]) {
+            charRuns.push({ char: password[i], count: 1 });
+        } else {
+            charRuns[charRuns.length - 1].count++;
+        }
+    }
+    const maxCharRun = Math.max(...charRuns.map(r => r.count));
+    if (maxCharRun <= 2) breakdown.structure += 3;
+    else if (maxCharRun <= 3) breakdown.structure += 1;
+
+    // --- Deductions ---
+
+    // Common word exact match -> score 0
+    for (const word of commonWords) {
         if (lower === word) {
             feedback.push("This is a very common password.");
-            return { score: 0, feedback };
+            breakdown.deductions = 50;
+            return { score: 0, feedback, breakdown };
         }
+    }
 
+    // Common word substring (penalty scales with matched word length)
+    for (const word of commonWords) {
         if (lower.includes(word)) {
-            score -= 40;
+            const penalty = Math.min(15 + word.length * 2, 35);
+            breakdown.deductions += penalty;
             feedback.push(`Contains common word: ${word}`);
             break;
         }
     }
 
-    for (let pattern of keyboardPatterns) {
+    // Keyboard pattern (penalty scales with pattern length)
+    for (const pattern of keyboardPatterns) {
         if (lower.includes(pattern)) {
-            score -= 30;
+            const penalty = Math.min(8 + pattern.length * 2, 20);
+            breakdown.deductions += penalty;
             feedback.push(`Contains keyboard pattern: ${pattern}`);
             break;
         }
     }
 
-    if (/123|234|345|456|567|678|789/.test(password) ||
-        /abc|bcd|cde|def/.test(lower)) {
-        score -= 25;
+    // Sequential characters (forward and reverse)
+    if (/(?:123|234|345|456|567|678|789|890|abc|bcd|cde|def|efg|fgh|ghi|hij|ijk|jkl|klm|lmn|mno|nop|opq|pqr|qrs|rst|stu|tuv|uvw|vwx|wxy|xyz)/i.test(password) ||
+        /(?:987|876|765|654|543|432|321|210)/.test(password)) {
+        breakdown.deductions += 20;
         feedback.push("Contains sequential characters.");
     }
 
+    // Common year
     if (/19\d{2}|20\d{2}/.test(password)) {
-        score -= 25;
+        breakdown.deductions += 15;
         feedback.push("Contains a common year.");
     }
 
-    if (/(.)\1\1+/.test(password)) {
-        score -= 15;
+    // Repeated characters (scaled by total repeated length)
+    const repeatMatches = password.match(/(.)\1{2,}/g);
+    if (repeatMatches) {
+        const totalRepeated = repeatMatches.reduce((s, m) => s + m.length, 0);
+        breakdown.deductions += totalRepeated >= 5 ? 20 : 12;
         feedback.push("Contains repeated characters.");
     }
 
-    if (/^[A-Z][a-z0-9!@#$%^&*]+$/.test(password)) {
-        score -= 15;
+    // Capital only at beginning
+    if (/^[A-Z][^A-Z]*$/.test(password) && /[a-z]/.test(password)) {
+        breakdown.deductions += 10;
         feedback.push("Capital letter only at the beginning.");
     }
 
-    if (/^[A-Za-z!@#$%^&*]+[0-9]+$/.test(password)) {
-        score -= 15;
+    // Numbers only at end
+    if (/^[^0-9]+[0-9]+$/.test(password) && hasDigit) {
+        breakdown.deductions += 10;
         feedback.push("Numbers only at the end.");
     }
 
-    if (/^[A-Za-z0-9]+[^A-Za-z0-9]+$/.test(password)) {
-        score -= 10;
+    // Special characters only at end
+    if (/^[^!@#$%^&*()\-_=+\[\]{}|;:',.<>?\/~`]+[!@#$%^&*()\-_=+\[\]{}|;:',.<>?\/~`]+$/.test(password) && hasSymbol) {
+        breakdown.deductions += 8;
         feedback.push("Special characters only at the end.");
     }
 
-    if (/^[a-z]+$/.test(password) ||
-        /^[A-Z]+$/.test(password) ||
-        /^[0-9]+$/.test(password)) {
-        score -= 30;
+    // Single character type
+    if (typeCount === 1) {
+        const isDigitOnly = /^[0-9]+$/.test(password);
+        breakdown.deductions += isDigitOnly ? 30 : 25;
         feedback.push("Uses only one character type.");
     }
 
-    for (let name of commonNames) {
+    // Common name
+    for (const name of commonNames) {
         if (lower.includes(name)) {
-            score -= 15;
+            breakdown.deductions += 12;
             feedback.push(`Contains common name: ${name}`);
             break;
         }
     }
 
-    for (let word of englishWords) {
-        if (lower.includes(word)) {
-            score -= 15;
+    // Common English word (only words >= 4 chars to avoid noise)
+    for (const word of englishWords) {
+        if (word.length >= 4 && lower.includes(word)) {
+            breakdown.deductions += 12;
             feedback.push(`Contains common English word: ${word}`);
             break;
         }
     }
 
-    if (password.length > 2 && password === password.split("").reverse().join("")) {
-        score -= 10;
+    // Palindrome
+    if (length > 2 && password === password.split("").reverse().join("")) {
+        breakdown.deductions += 8;
         feedback.push("Password is a palindrome, making it predictable.");
     }
 
-    const uniqueChars = new Set(password).size;
-    if (uniqueChars <= 3 && password.length > 5) {
-        score -= 20;
+    // Low unique character count
+    if (uniqueCount <= 3 && length > 5) {
+        breakdown.deductions += 15;
         feedback.push("Uses very few unique characters.");
     }
 
-    if (/[a-z]+(19|20)\d{2}/i.test(password)) {
-        score -= 15;
+    // Base word + year
+    if (/[a-zA-Z]+(?:19|20)\d{2}/.test(password)) {
+        breakdown.deductions += 15;
         feedback.push("Uses a common base word with a year appended.");
     }
 
-    if (
-        hasUpper &&
-        hasDigit &&
-        hasSymbol &&
-        !/^[A-Z]/.test(password) &&
-        !/[0-9]+$/.test(password)
-    ) {
-        score += 10;
+    // --- Bonuses ---
+
+    // Long + well-mixed
+    if (length >= 12 && typeCount >= 3) breakdown.bonuses += 8;
+    if (length >= 16 && typeCount >= 3) breakdown.bonuses += 10;
+
+    // Passphrase structure (4+ segments separated by delimiters)
+    if (/^[a-z0-9]+(?:[-_][a-z0-9]+){3,}$/i.test(password) && length >= 16) {
+        const segments = password.split(/[-_]/);
+        const hasMixed = segments.some(s => /[0-9]/.test(s)) &&
+                        segments.some(s => /[a-z]/i.test(s));
+        const allValid = segments.every(s => s.length >= 3);
+        if (hasMixed && allValid) breakdown.bonuses += 12;
     }
 
-    if (length >= 12 && varietyCount >= 3) {
-        score += 10;
+    // True randomness bonus: all 4 types, well-interleaved, high unique ratio
+    if (typeCount === 4 && length >= 8) {
+        const uniqueRatio = uniqueCount / length;
+        const wellInterleaved = runCount >= length * 0.5;
+        const noCharRepeats = maxCharRun <= 2;
+        const highUniqueRatio = uniqueRatio >= 0.6;
+        let randomBonus = 0;
+        if (wellInterleaved) randomBonus += 8;
+        if (noCharRepeats) randomBonus += 7;
+        if (highUniqueRatio) randomBonus += 5;
+        if (length >= 12) randomBonus += 5;
+        if (length >= 16) randomBonus += 5;
+        breakdown.bonuses += randomBonus;
     }
 
-    if (length >= 16 && varietyCount >= 3) {
-        score += 20;
-    }
+    // No weaknesses flagged at all
+    if (feedback.length === 0) breakdown.bonuses += 5;
 
-    if (/^[a-z0-9]+(-[a-z0-9]+)+$/i.test(password) && length >= 16) {
-        score += 15;
-    }
+    // --- Calculate final score ---
+    let score = breakdown.length + breakdown.variety + breakdown.structure
+              - breakdown.deductions + breakdown.bonuses;
 
-    const looksRandomSegmented =
-        /^[a-z0-9]+(-[a-z0-9]+)+$/i.test(password);
-
-    const segmentParts = password.split("-");
-
-    const hasEnoughSegments = segmentParts.length >= 4;
-    const segmentsAreReasonable = segmentParts.every(part => part.length >= 3);
-    const hasMixedSegmentContent = segmentParts.some(part => /[0-9]/.test(part)) &&
-                                segmentParts.some(part => /[a-z]/i.test(part));
-
-    if (
-        looksRandomSegmented &&
-        password.length >= 16 &&
-        hasEnoughSegments &&
-        segmentsAreReasonable &&
-        hasMixedSegmentContent
-    ) {
-        score += 20;
-    }
-
+    // Moderation: if score is high but issues exist, shave off some excess
     if (score > 85 && feedback.length >= 1) {
-        score -= 10;
+        score -= Math.min(score - 85, 10);
     }
 
-    score = Math.max(0, Math.min(100, score));
+    score = Math.max(0, Math.min(100, Math.round(score)));
 
-    return { score, feedback };
+    return { score, feedback, breakdown };
 }
 
 function getStrength(score) {
     if (score >= 85) return "Strong";
-    if (score >= 65) return "Medium";
-    if (score >= 40) return "Weak";
+    if (score >= 70) return "Good";
+    if (score >= 55) return "Average";
+    if (score >= 40) return "Below Average";
     return "Very Weak";
 }
 
@@ -226,7 +301,11 @@ function generateVariations(word) {
     return results;
 }
 
-function tryBruteForce(password, charset, maxLen, startTime, timeLimitMs, state) {
+function yieldToUI() {
+    return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+async function tryBruteForce(password, charset, maxLen, startTime, timeLimitMs, state) {
     const cl = charset.length;
     let checkCounter = 0;
     for (let len = 1; len <= maxLen; len++) {
@@ -246,13 +325,14 @@ function tryBruteForce(password, charset, maxLen, startTime, timeLimitMs, state)
             if (checkCounter >= 10000) {
                 if (Date.now() - startTime >= timeLimitMs) return false;
                 checkCounter = 0;
+                await yieldToUI();
             }
         }
     }
     return false;
 }
 
-function crackTest(password, timeLimitSeconds) {
+async function crackTest(password, timeLimitSeconds) {
     const timeLimitMs = timeLimitSeconds * 1000;
     const startTime = Date.now();
     const state = { guesses: 0 };
@@ -305,7 +385,6 @@ function crackTest(password, timeLimitSeconds) {
     }
 
     // Phase 4: Brute-force with limited character sets and lengths
-    // Strategy: try smaller charsets first, then expand, prioritizing shorter lengths
     const fullCharset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:',.<>?/~`";
     const bruteForcePhases = [
         { charset: "abcdefghijklmnopqrstuvwxyz", maxLen: 4 },
@@ -320,22 +399,20 @@ function crackTest(password, timeLimitSeconds) {
 
     for (const phase of bruteForcePhases) {
         if (!hasTime()) break;
-        const found = tryBruteForce(password, phase.charset, phase.maxLen, startTime, timeLimitMs, state);
+        const found = await tryBruteForce(password, phase.charset, phase.maxLen, startTime, timeLimitMs, state);
         if (found) {
             return { cracked: true, time: elapsed(), guesses: state.guesses, mode: "Brute force" };
         }
     }
 
-    // Phase 5: Continuous fallback - keep trying with full charset at increasing
-    // lengths until the time limit expires
+    // Phase 5: Continuous fallback
     for (let len = 5; hasTime(); len++) {
-        const found = tryBruteForce(password, fullCharset, len, startTime, timeLimitMs, state);
+        const found = await tryBruteForce(password, fullCharset, len, startTime, timeLimitMs, state);
         if (found) {
             return { cracked: true, time: elapsed(), guesses: state.guesses, mode: "Brute force" };
         }
     }
 
-    // Not cracked within time limit
     return {
         cracked: false,
         time: elapsed(),
@@ -451,11 +528,14 @@ function getSuggestions(feedback, score) {
     return [...new Set(suggestions)];
 }
 
+let isAnalyzing = false;
+
 function runAnalysis() {
     const password = document.getElementById("password").value;
     const resultsDiv = document.getElementById("results");
     const errorBox = document.getElementById("errorBox");
     const timeLimit = Number(document.getElementById("timeLimit").value) || 2;
+    const btn = document.getElementById("analyzeBtn");
 
     errorBox.style.display = "none";
     errorBox.innerHTML = "";
@@ -479,65 +559,109 @@ function runAnalysis() {
         return;
     }
 
-    const analysis = analyzePassword(password);
-    const crackResult = crackTest(password, timeLimit);
+    if (isAnalyzing) return;
+    isAnalyzing = true;
 
-    document.getElementById("score").textContent = analysis.score;
-    document.getElementById("strength").textContent = getStrength(analysis.score);
+    btn.disabled = true;
+    let dotCount = 0;
+    let animating = true;
 
-    const feedbackList = document.getElementById("feedback");
-    feedbackList.innerHTML = "";
+    function animateDots() {
+        if (!animating) return;
+        dotCount = (dotCount % 3) + 1;
+        btn.textContent = "Running" + ".".repeat(dotCount);
+        setTimeout(animateDots, 180);
+    }
 
-    if (analysis.feedback.length === 0) {
-        const li = document.createElement("li");
-        li.textContent = "No obvious weaknesses detected.";
-        feedbackList.appendChild(li);
-    } else {
-        analysis.feedback.forEach(item => {
+    function doneAndReset() {
+        btn.textContent = "Done";
+        setTimeout(() => {
+            btn.textContent = "Run Analysis";
+            btn.disabled = false;
+            isAnalyzing = false;
+        }, 1000);
+    }
+
+    async function runWork() {
+        const analysis = analyzePassword(password);
+        const crackResult = await crackTest(password, timeLimit);
+
+        document.getElementById("score").textContent = analysis.score;
+        document.getElementById("strength").textContent = getStrength(analysis.score);
+
+        if (analysis.breakdown) {
+            document.getElementById("bd-length").textContent = Math.round(analysis.breakdown.length);
+            document.getElementById("bd-variety").textContent = Math.round(analysis.breakdown.variety);
+            document.getElementById("bd-structure").textContent = Math.round(analysis.breakdown.structure);
+            document.getElementById("bd-deductions").textContent = `-${analysis.breakdown.deductions}`;
+            document.getElementById("bd-bonuses").textContent = `+${analysis.breakdown.bonuses}`;
+            document.getElementById("bd-score").textContent = analysis.score;
+        }
+
+        const feedbackList = document.getElementById("feedback");
+        feedbackList.innerHTML = "";
+
+        if (analysis.feedback.length === 0) {
+            const li = document.createElement("li");
+            li.textContent = "No obvious weaknesses detected.";
+            feedbackList.appendChild(li);
+        } else {
+            analysis.feedback.forEach(item => {
+                const li = document.createElement("li");
+                li.textContent = item;
+                feedbackList.appendChild(li);
+            });
+        }
+
+        const suggestionsList = document.getElementById("suggestions");
+        suggestionsList.innerHTML = "";
+
+        const suggestions = getSuggestions(
+            analysis.feedback,
+            analysis.score
+        );
+
+        suggestions.forEach(item => {
             const li = document.createElement("li");
             li.textContent = item;
-            feedbackList.appendChild(li);
+            suggestionsList.appendChild(li);
         });
+
+        document.getElementById("cracked").textContent = crackResult.cracked ? "Yes" : "No";
+        document.getElementById("mode").textContent = crackResult.mode;
+        document.getElementById("time").textContent = crackResult.time.toFixed(2);
+        document.getElementById("guesses").textContent = crackResult.guesses.toLocaleString();
+
+        let comparison;
+        const crackedDetail = crackResult.cracked
+            ? `Cracked in ${crackResult.time.toFixed(2)}s via ${crackResult.mode.toLowerCase()} with ${crackResult.guesses.toLocaleString()} guesses.`
+            : `Resisted cracking for ${crackResult.time.toFixed(2)}s (${crackResult.guesses.toLocaleString()} guesses attempted via ${crackResult.mode.toLowerCase()}).`;
+
+        if (crackResult.cracked && analysis.score < 40) {
+            comparison = `Very weak password. ${crackedDetail} The analytical score confirms it has minimal resistance to any attack method.`;
+        } else if (crackResult.cracked && analysis.score < 55) {
+            comparison = `Weak password. ${crackedDetail} The analytical score indicates structural weaknesses that made it an easy target.`;
+        } else if (crackResult.cracked && analysis.score < 70) {
+            comparison = `Below average password. ${crackedDetail} Despite a moderate analytical score, the cracking engine found it within the time limit. Address the weaknesses above.`;
+        } else if (crackResult.cracked) {
+            comparison = `Average password. ${crackedDetail} It was cracked despite a decent score - likely a dictionary word or pattern that automated tools check early.`;
+        } else if (!crackResult.cracked && analysis.score >= 85) {
+            comparison = `Strong password. ${crackedDetail} The analytical score is excellent and it withstood the time-bounded brute-force attempt. Good password practices in use.`;
+        } else if (!crackResult.cracked && analysis.score >= 70) {
+            comparison = `Good password. ${crackedDetail} It resisted cracking within the time limit, though minor improvements could still help. Check the suggestions above.`;
+        } else if (!crackResult.cracked && analysis.score >= 55) {
+            comparison = `Average password. ${crackedDetail} It resisted cracking, but the analytical score shows clear room for improvement - address the weaknesses listed above.`;
+        } else {
+            comparison = `Weak but not cracked. ${crackedDetail} The password survived the time limit but the analytical score reveals serious structural issues. Do not rely on this password.`;
+        }
+
+        document.getElementById("comparison").textContent = comparison;
+        resultsDiv.style.display = "block";
+
+        animating = false;
+        doneAndReset();
     }
 
-    const suggestionsList = document.getElementById("suggestions");
-    suggestionsList.innerHTML = "";
-
-    const suggestions = getSuggestions(
-        analysis.feedback,
-        analysis.score
-    );
-
-    suggestions.forEach(item => {
-        const li = document.createElement("li");
-        li.textContent = item;
-        suggestionsList.appendChild(li);
-    });
-
-    document.getElementById("cracked").textContent = crackResult.cracked ? "Yes" : "No";
-    document.getElementById("mode").textContent = crackResult.mode;
-    document.getElementById("time").textContent = crackResult.time.toFixed(2);
-    document.getElementById("guesses").textContent = crackResult.guesses.toLocaleString();
-
-    let comparison;
-    const crackedDetail = crackResult.cracked
-        ? `Cracked in ${crackResult.time.toFixed(2)}s via ${crackResult.mode.toLowerCase()} with ${crackResult.guesses.toLocaleString()} guesses.`
-        : `Resisted cracking for ${crackResult.time.toFixed(2)}s (${crackResult.guesses.toLocaleString()} guesses attempted via ${crackResult.mode.toLowerCase()}).`;
-
-    if (crackResult.cracked && analysis.score < 40) {
-        comparison = `Very weak password. ${crackedDetail} The analytical score confirms it has minimal resistance to any attack method.`;
-    } else if (crackResult.cracked && analysis.score < 65) {
-        comparison = `Weak password. ${crackedDetail} The analytical score indicates structural weaknesses that made it an easy target.`;
-    } else if (crackResult.cracked) {
-        comparison = `Moderate password. ${crackedDetail} Despite a decent analytical score, the cracking engine found it within the time limit. Consider the weaknesses above.`;
-    } else if (!crackResult.cracked && analysis.score >= 85) {
-        comparison = `Strong password. ${crackedDetail} The analytical score is excellent and it withstood the time-bounded brute-force attempt. Good password practices in use.`;
-    } else if (!crackResult.cracked && analysis.score >= 65) {
-        comparison = `Moderately strong password. ${crackedDetail} It resisted cracking within the time limit, but the analytical score shows room for improvement - address the weaknesses listed above to strengthen it further.`;
-    } else {
-        comparison = `Mixed result. ${crackedDetail} The password resisted cracking, but the analytical score reveals clear structural issues. Fix the weaknesses above before relying on this password.`;
-    }
-
-    document.getElementById("comparison").textContent = comparison;
-    resultsDiv.style.display = "block";
+    animateDots();
+    runWork();
 }
